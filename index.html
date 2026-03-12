@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+  <title>Registro de Abordaje</title>
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #f5f5f5; font-family: 'Segoe UI', Arial, sans-serif; }
+    input:focus { outline: none; border-color: #3a9ea5 !important; }
+    @media print { body { background: white; } .no-print { display: none; } }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useRef } = React;
+
+    const SAMPLE_PASSENGERS = [
+      { id: "12345678", nombre: "Carlos", apellido: "García", mail: "carlos@mail.com" },
+      { id: "87654321", nombre: "Laura", apellido: "Martínez", mail: "laura@mail.com" },
+      { id: "11223344", nombre: "Juan", apellido: "López", mail: "juan@mail.com" },
+    ];
+
+    const SK_PASS = "bus:passengers";
+    const SK_LOGS = "bus:logs";
+
+    function loadStorage(key, fallback) {
+      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
+      catch { return fallback; }
+    }
+    function saveStorage(key, value) {
+      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
+    }
+
+    function App() {
+      const [screen, setScreen] = useState("dni");
+      const [dni, setDni] = useState("");
+      const [found, setFound] = useState(null);
+      const [form, setForm] = useState({ nombre: "", apellido: "", dni: "", mail: "" });
+      const [passengers, setPassengers] = useState(() => loadStorage(SK_PASS, SAMPLE_PASSENGERS));
+      const [logs, setLogs] = useState(() => loadStorage(SK_LOGS, []));
+      const [showAdmin, setShowAdmin] = useState(false);
+      const [showCartel, setShowCartel] = useState(false);
+      const qrRef = useRef(null);
+      const qrInstance = useRef(null);
+
+      useEffect(() => {
+        if (showCartel && qrRef.current && !qrInstance.current) {
+          qrInstance.current = new QRCode(qrRef.current, {
+            text: "https://matihs99.github.io/Registro-Abordaje/",
+            width: 200, height: 200,
+            colorDark: "#000000", colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.H,
+          });
+        }
+        if (!showCartel) qrInstance.current = null;
+      }, [showCartel]);
+
+      const setAndSavePassengers = (list) => { setPassengers(list); saveStorage(SK_PASS, list); };
+      const setAndSaveLogs = (list) => { setLogs(list); saveStorage(SK_LOGS, list); };
+
+      const handleSearch = () => {
+        if (!dni.trim()) return;
+        const match = passengers.find(p => p.id === dni.trim());
+        setFound(match || null);
+        setScreen("confirm");
+      };
+
+      const handleBoard = () => {
+        const entry = { id: found.id, nombre: found.nombre, apellido: found.apellido, timestamp: new Date().toISOString() };
+        setAndSaveLogs([entry, ...logs]);
+        setScreen("success");
+      };
+
+      const handleRegister = () => {
+        const newP = { id: form.dni, nombre: form.nombre, apellido: form.apellido, mail: form.mail };
+        setAndSavePassengers([...passengers, newP]);
+        const entry = { id: newP.id, nombre: newP.nombre, apellido: newP.apellido, timestamp: new Date().toISOString() };
+        setAndSaveLogs([entry, ...logs]);
+        setFound(newP);
+        setScreen("success");
+      };
+
+      const reset = () => {
+        setDni(""); setFound(null);
+        setForm({ nombre: "", apellido: "", dni: "", mail: "" });
+        setScreen("dni");
+      };
+
+      const formatDate = (iso) => {
+        const d = new Date(iso);
+        return d.toLocaleDateString("es-AR") + " " + d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+      };
+
+      const exportCSV = () => {
+        const header = "Nombre,Apellido,DNI,Fecha,Hora\n";
+        const rows = logs.map(l => {
+          const d = new Date(l.timestamp);
+          return l.nombre + "," + l.apellido + "," + l.id + "," +
+            d.toLocaleDateString("es-AR") + "," +
+            d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+        }).join("\n");
+        const blob = new Blob([header + rows], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "logs_abordaje_" + new Date().toISOString().slice(0, 10) + ".csv";
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const s = styles;
+
+      // CARTEL
+      if (showCartel) return (
+        <div style={{ minHeight: "100dvh", background: "#e0e0e0", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: 24, gap: 20 }}>
+          <p className="no-print" style={{ fontSize: 13, color: "#888" }}>Vista previa del cartel para imprimir</p>
+          <div style={{ background: "linear-gradient(145deg,#4dbdbd,#3a9ea5)", borderRadius: 20, border: "8px solid #fff", boxShadow: "0 8px 32px rgba(0,0,0,0.18)", padding: "28px 24px", width: 300, display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+            <p style={{ color: "#fff", fontWeight: 900, fontSize: 19, textAlign: "center", letterSpacing: 1.5, textTransform: "uppercase", lineHeight: 1.3 }}>Registro Diario de Transporte</p>
+            <p style={{ color: "#fff", fontWeight: 600, fontSize: 14, textAlign: "center", opacity: 0.92 }}>Servicio BDC – RDLS</p>
+            <div style={{ width: "55%", height: 2, background: "rgba(255,255,255,0.4)", borderRadius: 2 }}></div>
+            <div style={{ background: "#fff", borderRadius: 12, padding: 12 }}>
+              <div ref={qrRef}></div>
+            </div>
+            <p style={{ color: "#fff", fontSize: 12, textAlign: "center", opacity: 0.85 }}>📱 Escaneá el QR para registrar tu abordaje</p>
+          </div>
+          <div className="no-print" style={{ display: "flex", gap: 10 }}>
+            <button style={{ ...s.btn, width: "auto", padding: "12px 20px", background: "#3a9ea5" }} onClick={() => window.print()}>🖨️ Imprimir</button>
+            <button style={{ ...s.btn, width: "auto", padding: "12px 20px" }} onClick={() => { setShowCartel(false); setShowAdmin(true); }}>← Volver</button>
+          </div>
+        </div>
+      );
+
+      // ADMIN
+      if (showAdmin) return (
+        <div style={s.container}>
+          <div style={s.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", marginBottom: 16 }}>
+              <h2 style={s.title}>Panel de Admin</h2>
+              <button onClick={() => setShowAdmin(false)} style={s.linkBtn}>← Volver</button>
+            </div>
+            <button style={{ ...s.btn, background: "#3a9ea5", marginBottom: 8 }} onClick={() => { setShowAdmin(false); setShowCartel(true); }}>
+              📱 Ver cartel QR
+            </button>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", marginTop: 12 }}>
+              <h3 style={{ ...s.sectionTitle, margin: 0 }}>Logs de Abordaje ({logs.length})</h3>
+              {logs.length > 0 && <button onClick={exportCSV} style={s.csvBtn}>↓ CSV</button>}
+            </div>
+            {logs.length === 0
+              ? <p style={s.sub}>Sin registros aún.</p>
+              : <div style={s.table}>
+                  {logs.map((l, i) => (
+                    <div key={i} style={s.row}>
+                      <div>
+                        <div style={s.rowName}>{l.nombre} {l.apellido}</div>
+                        <div style={s.rowSub}>DNI: {l.id}</div>
+                      </div>
+                      <div style={s.rowDate}>{formatDate(l.timestamp)}</div>
+                    </div>
+                  ))}
+                </div>
+            }
+            <h3 style={{ ...s.sectionTitle, marginTop: 24 }}>Pasajeros Registrados ({passengers.length})</h3>
+            <div style={s.table}>
+              {passengers.map((p, i) => (
+                <div key={i} style={s.row}>
+                  <div>
+                    <div style={s.rowName}>{p.nombre} {p.apellido}</div>
+                    <div style={s.rowSub}>DNI: {p.id} · {p.mail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      );
+
+      // PANTALLAS PRINCIPALES
+      return (
+        <div style={s.container}>
+          {screen === "dni" && (
+            <div style={s.card}>
+              <div style={s.icon}>🚌</div>
+              <h1 style={s.title}>Registro de Abordaje</h1>
+              <p style={s.sub}>Ingresá tu DNI para subir al bus</p>
+              <input style={s.input} type="number" placeholder="Número de DNI" value={dni}
+                onChange={e => setDni(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && handleSearch()} />
+              <button style={s.btn} onClick={handleSearch}>Buscar</button>
+              <button style={s.linkBtn} onClick={() => setShowAdmin(true)}>Panel Admin</button>
+            </div>
+          )}
+
+          {screen === "confirm" && found && (
+            <div style={s.card}>
+              <div style={s.icon}>👤</div>
+              <h1 style={s.title}>¡Hola, {found.nombre}!</h1>
+              <p style={s.sub}>{found.nombre} {found.apellido}</p>
+              <p style={{ ...s.sub, fontSize: 13 }}>DNI: {found.id}</p>
+              <div style={s.badge}>✓ Pasajero registrado</div>
+              <button style={s.btn} onClick={handleBoard}>Subir al bus</button>
+              <button style={s.linkBtn} onClick={reset}>← Volver</button>
+            </div>
+          )}
+
+          {screen === "confirm" && !found && (
+            <div style={s.card}>
+              <div style={s.icon}>❓</div>
+              <h1 style={s.title}>No encontrado</h1>
+              <p style={s.sub}>El DNI <strong>{dni}</strong> no figura en el sistema.</p>
+              <button style={s.btn} onClick={() => { setForm({ nombre: "", apellido: "", dni: dni, mail: "" }); setScreen("register"); }}>
+                Registrarse
+              </button>
+              <button style={s.linkBtn} onClick={reset}>← Volver</button>
+            </div>
+          )}
+
+          {screen === "register" && (
+            <div style={s.card}>
+              <div style={s.icon}>📋</div>
+              <h1 style={s.title}>Registro</h1>
+              <p style={s.sub}>Completá tus datos para continuar</p>
+              {["nombre", "apellido", "dni", "mail"].map(field => (
+                <input key={field} style={s.input}
+                  type={field === "mail" ? "email" : field === "dni" ? "number" : "text"}
+                  placeholder={{ nombre: "Nombre", apellido: "Apellido", dni: "DNI", mail: "Email" }[field]}
+                  value={form[field]}
+                  onChange={e => setForm({ ...form, [field]: e.target.value })} />
+              ))}
+              <button
+                style={{ ...s.btn, opacity: Object.values(form).some(v => !v.trim()) ? 0.5 : 1 }}
+                disabled={Object.values(form).some(v => !v.trim())}
+                onClick={handleRegister}>
+                Registrarme y Subir
+              </button>
+              <button style={s.linkBtn} onClick={reset}>← Volver</button>
+            </div>
+          )}
+
+          {screen === "success" && (
+            <div style={s.card}>
+              <div style={{ fontSize: 56, marginBottom: 12 }}>✅</div>
+              <h1 style={s.title}>¡Buen viaje!</h1>
+              <p style={s.sub}>{found && found.nombre} {found && found.apellido}</p>
+              <p style={{ ...s.sub, fontSize: 13, color: "#aaa" }}>Abordaje registrado correctamente</p>
+              <button style={s.btn} onClick={reset}>Nueva consulta</button>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    const styles = {
+      container: { minHeight: "100dvh", background: "#f5f5f5", display: "flex", alignItems: "flex-start", justifyContent: "center", padding: "16px 12px" },
+      card: { background: "#fff", borderRadius: 16, padding: "28px 20px", width: "100%", maxWidth: 420, boxShadow: "0 2px 20px rgba(0,0,0,0.08)", display: "flex", flexDirection: "column", alignItems: "center", gap: 10 },
+      icon: { fontSize: 48, marginBottom: 4 },
+      title: { fontSize: 22, fontWeight: 700, margin: 0, color: "#111", textAlign: "center" },
+      sub: { fontSize: 14, color: "#666", margin: 0, textAlign: "center" },
+      input: { width: "100%", padding: "14px", borderRadius: 10, border: "1.5px solid #e0e0e0", fontSize: 16, boxSizing: "border-box", marginTop: 4, WebkitAppearance: "none" },
+      btn: { width: "100%", padding: "15px", background: "#111", color: "#fff", border: "none", borderRadius: 10, fontSize: 16, fontWeight: 600, cursor: "pointer", marginTop: 8 },
+      linkBtn: { background: "none", border: "none", color: "#888", fontSize: 13, cursor: "pointer", marginTop: 4 },
+      csvBtn: { background: "#f5f5f5", border: "1.5px solid #e0e0e0", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "#111" },
+      badge: { background: "#f0faf0", color: "#2e7d32", borderRadius: 8, padding: "6px 14px", fontSize: 13, fontWeight: 600, marginTop: 4 },
+      sectionTitle: { fontSize: 15, fontWeight: 700, margin: "0 0 10px", alignSelf: "flex-start" },
+      table: { width: "100%", display: "flex", flexDirection: "column", gap: 8 },
+      row: { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 12px", background: "#f9f9f9", borderRadius: 8 },
+      rowName: { fontSize: 14, fontWeight: 600, color: "#111" },
+      rowSub: { fontSize: 12, color: "#888", marginTop: 2 },
+      rowDate: { fontSize: 12, color: "#888", textAlign: "right", flexShrink: 0, marginLeft: 8 },
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById("root"));
+    root.render(<App />);
+  </script>
+</body>
+</html>
