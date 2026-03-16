@@ -8,6 +8,8 @@
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body { background: #f5f5f5; font-family: 'Segoe UI', Arial, sans-serif; }
@@ -18,6 +20,19 @@
 <body>
   <div id="root"></div>
 
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyA_4yBgjdvh-poWzTOT0pBdTBo0xoXQKvI",
+      authDomain: "registro-abordaje.firebaseapp.com",
+      projectId: "registro-abordaje",
+      storageBucket: "registro-abordaje.firebasestorage.app",
+      messagingSenderId: "740184020712",
+      appId: "1:740184020712:web:79ce72c41c6050d1285b5d"
+    };
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.firestore();
+  </script>
+
   <script type="text/babel">
     const { useState, useEffect, useRef } = React;
 
@@ -27,33 +42,49 @@
       { id: "11223344", nombre: "Juan", apellido: "López", mail: "juan@mail.com" },
     ];
 
-    const SK_PASS = "bus:passengers";
-    const SK_LOGS = "bus:logs";
-
-    function loadStorage(key, fallback) {
-      try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : fallback; }
-      catch { return fallback; }
-    }
-    function saveStorage(key, value) {
-      try { localStorage.setItem(key, JSON.stringify(value)); } catch {}
-    }
-
     function App() {
       const [screen, setScreen] = useState("dni");
       const [dni, setDni] = useState("");
       const [found, setFound] = useState(null);
       const [form, setForm] = useState({ nombre: "", apellido: "", dni: "", mail: "" });
-      const [passengers, setPassengers] = useState(() => loadStorage(SK_PASS, SAMPLE_PASSENGERS));
-      const [logs, setLogs] = useState(() => loadStorage(SK_LOGS, []));
+      const [passengers, setPassengers] = useState([]);
+      const [logs, setLogs] = useState([]);
       const [showAdmin, setShowAdmin] = useState(false);
       const [showCartel, setShowCartel] = useState(false);
+      const [loading, setLoading] = useState(true);
       const qrRef = useRef(null);
       const qrInstance = useRef(null);
+
+      // Cargar datos desde Firestore al iniciar
+      useEffect(() => {
+        const loadData = async () => {
+          try {
+            // Cargar pasajeros
+            const passSnap = await db.collection("passengers").get();
+            if (passSnap.empty) {
+              // Cargar datos de muestra si no hay ninguno
+              for (const p of SAMPLE_PASSENGERS) {
+                await db.collection("passengers").doc(p.id).set(p);
+              }
+              setPassengers(SAMPLE_PASSENGERS);
+            } else {
+              setPassengers(passSnap.docs.map(d => d.data()));
+            }
+            // Cargar logs
+            const logsSnap = await db.collection("logs").orderBy("timestamp", "desc").get();
+            setLogs(logsSnap.docs.map(d => d.data()));
+          } catch (e) {
+            console.error("Error cargando datos:", e);
+          }
+          setLoading(false);
+        };
+        loadData();
+      }, []);
 
       useEffect(() => {
         if (showCartel && qrRef.current && !qrInstance.current) {
           qrInstance.current = new QRCode(qrRef.current, {
-            text: "https://matihs99.github.io/Registro-Abordaje/",
+            text: "https://registroabordaje.com",
             width: 200, height: 200,
             colorDark: "#000000", colorLight: "#ffffff",
             correctLevel: QRCode.CorrectLevel.H,
@@ -62,9 +93,6 @@
         if (!showCartel) qrInstance.current = null;
       }, [showCartel]);
 
-      const setAndSavePassengers = (list) => { setPassengers(list); saveStorage(SK_PASS, list); };
-      const setAndSaveLogs = (list) => { setLogs(list); saveStorage(SK_LOGS, list); };
-
       const handleSearch = () => {
         if (!dni.trim()) return;
         const match = passengers.find(p => p.id === dni.trim());
@@ -72,17 +100,34 @@
         setScreen("confirm");
       };
 
-      const handleBoard = () => {
-        const entry = { id: found.id, nombre: found.nombre, apellido: found.apellido, timestamp: new Date().toISOString() };
-        setAndSaveLogs([entry, ...logs]);
+      const handleBoard = async () => {
+        const entry = {
+          id: found.id,
+          nombre: found.nombre,
+          apellido: found.apellido,
+          timestamp: new Date().toISOString(),
+        };
+        try {
+          await db.collection("logs").add(entry);
+          setLogs([entry, ...logs]);
+        } catch (e) { console.error("Error guardando log:", e); }
         setScreen("success");
       };
 
-      const handleRegister = () => {
+      const handleRegister = async () => {
         const newP = { id: form.dni, nombre: form.nombre, apellido: form.apellido, mail: form.mail };
-        setAndSavePassengers([...passengers, newP]);
-        const entry = { id: newP.id, nombre: newP.nombre, apellido: newP.apellido, timestamp: new Date().toISOString() };
-        setAndSaveLogs([entry, ...logs]);
+        const entry = {
+          id: newP.id,
+          nombre: newP.nombre,
+          apellido: newP.apellido,
+          timestamp: new Date().toISOString(),
+        };
+        try {
+          await db.collection("passengers").doc(newP.id).set(newP);
+          await db.collection("logs").add(entry);
+          setPassengers([...passengers, newP]);
+          setLogs([entry, ...logs]);
+        } catch (e) { console.error("Error registrando:", e); }
         setFound(newP);
         setScreen("success");
       };
@@ -93,9 +138,9 @@
         setScreen("dni");
       };
 
-      const formatDate = (iso) => {
+      const formatTime = (iso) => {
         const d = new Date(iso);
-        return d.toLocaleDateString("es-AR") + " " + d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+        return d.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
       };
 
       const exportCSV = () => {
@@ -115,7 +160,26 @@
         URL.revokeObjectURL(url);
       };
 
+      // Agrupar logs por día
+      const logsPorDia = logs.reduce((acc, l) => {
+        const dia = new Date(l.timestamp).toLocaleDateString("es-AR", {
+          weekday: "long", year: "numeric", month: "long", day: "numeric"
+        });
+        if (!acc[dia]) acc[dia] = [];
+        acc[dia].push(l);
+        return acc;
+      }, {});
+
       const s = styles;
+
+      if (loading) return (
+        <div style={{ ...s.container, alignItems: "center" }}>
+          <div style={s.card}>
+            <div style={{ fontSize: 40 }}>🚌</div>
+            <p style={{ color: "#888", fontSize: 14 }}>Cargando...</p>
+          </div>
+        </div>
+      );
 
       // CARTEL
       if (showCartel) return (
@@ -145,27 +209,41 @@
               <h2 style={s.title}>Panel de Admin</h2>
               <button onClick={() => setShowAdmin(false)} style={s.linkBtn}>← Volver</button>
             </div>
+
             <button style={{ ...s.btn, background: "#3a9ea5", marginBottom: 8 }} onClick={() => { setShowAdmin(false); setShowCartel(true); }}>
               📱 Ver cartel QR
             </button>
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", width: "100%", marginTop: 12 }}>
               <h3 style={{ ...s.sectionTitle, margin: 0 }}>Logs de Abordaje ({logs.length})</h3>
               {logs.length > 0 && <button onClick={exportCSV} style={s.csvBtn}>↓ CSV</button>}
             </div>
+
             {logs.length === 0
               ? <p style={s.sub}>Sin registros aún.</p>
-              : <div style={s.table}>
-                  {logs.map((l, i) => (
-                    <div key={i} style={s.row}>
-                      <div>
-                        <div style={s.rowName}>{l.nombre} {l.apellido}</div>
-                        <div style={s.rowSub}>DNI: {l.id}</div>
+              : <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 16 }}>
+                  {Object.entries(logsPorDia).map(([dia, registros]) => (
+                    <div key={dia}>
+                      <div style={{ background: "#3a9ea5", color: "#fff", borderRadius: 8, padding: "6px 12px", fontSize: 12, fontWeight: 700, marginBottom: 6, textTransform: "capitalize", display: "flex", justifyContent: "space-between" }}>
+                        <span>{dia}</span>
+                        <span>{registros.length} abordaje{registros.length !== 1 ? "s" : ""}</span>
                       </div>
-                      <div style={s.rowDate}>{formatDate(l.timestamp)}</div>
+                      <div style={s.table}>
+                        {registros.map((l, i) => (
+                          <div key={i} style={s.row}>
+                            <div>
+                              <div style={s.rowName}>{l.nombre} {l.apellido}</div>
+                              <div style={s.rowSub}>DNI: {l.id}</div>
+                            </div>
+                            <div style={s.rowDate}>{formatTime(l.timestamp)}</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   ))}
                 </div>
             }
+
             <h3 style={{ ...s.sectionTitle, marginTop: 24 }}>Pasajeros Registrados ({passengers.length})</h3>
             <div style={s.table}>
               {passengers.map((p, i) => (
